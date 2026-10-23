@@ -4,25 +4,25 @@
 
 #pragma once
 
-#ifndef EncoderPIO_h
-#define EncoderPIO_h
-
 #include "Arduino.h"
 #include "hardware/pio.h"
 #include "hardware/irq.h"
 
 #include "EncoderPIO.pio.h"
 
+// One encoder per PIO block (2 on RP2040, 3 on RP2350).
+// The PIO program must load at offset 0 of its PIO block.
 class EncoderPIO
 {
 public:
-  EncoderPIO(uint8_t pioNum, uint8_t enc1Pin);
+  EncoderPIO(uint8_t pioNum, uint8_t enc1PinA);
 
-  void initialiseEncoder();
+  bool initialiseEncoder();                    // true on success; check the result
   int  getPosition();
-  void setPosition(int newPosition);
-  void setLimits(int minPos, int maxPos);
+  void setPosition(int newPosition);           // clamped to the limits
+  bool setLimits(int minPos, int maxPos);      // false if maxPos <= minPos
   void setWrap(bool wrap);
+  void setCountsPerDetent(uint8_t counts);     // 1 (default), 2 or 4 edges per step
 
 private:
   // Static so they can be registered with irq_add_shared_handler()
@@ -39,11 +39,16 @@ private:
   uint8_t _pioNum;
   uint8_t _encPin_1A;
   uint8_t _encPin_1B;
+  uint8_t _sm = 0;
+  uint    _offset = 0;
+  bool    _initialised = false;
 
-  volatile int _position = 0;   // changed in the ISR, so volatile
-  int  _minPos = 0;
-  int  _maxPos = 100;
-  bool _wrap   = false;
+  // Changed in the ISR, so volatile
+  volatile int    _position = 0;
+  volatile int8_t _subCount = 0;      // edges accumulated towards the next step
+
+  int     _minPos = 0;
+  int     _maxPos = 100;
+  bool    _wrap   = false;
+  volatile uint8_t _countsPerDetent = 1;
 };
-
-#endif
