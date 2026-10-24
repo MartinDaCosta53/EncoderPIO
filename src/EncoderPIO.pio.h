@@ -19,18 +19,18 @@ static const uint16_t EncoderPIO_program_instructions[] = {
             //     .wrap_target
     0x0011, //  0: jmp    17                         
     0x0015, //  1: jmp    21                         
-    0x0017, //  2: jmp    23                         
+    0x0015, //  2: jmp    21                         
     0x0011, //  3: jmp    17                         
-    0x0017, //  4: jmp    23                         
+    0x0015, //  4: jmp    21                         
     0x0011, //  5: jmp    17                         
     0x0011, //  6: jmp    17                         
     0x0015, //  7: jmp    21                         
     0x0015, //  8: jmp    21                         
     0x0011, //  9: jmp    17                         
     0x0011, // 10: jmp    17                         
-    0x0017, // 11: jmp    23                         
+    0x0015, // 11: jmp    21                         
     0x0011, // 12: jmp    17                         
-    0x0017, // 13: jmp    23                         
+    0x0015, // 13: jmp    21                         
     0x0015, // 14: jmp    21                         
     0x0011, // 15: jmp    17                         
     0x4002, // 16: in     pins, 2                    
@@ -38,9 +38,9 @@ static const uint16_t EncoderPIO_program_instructions[] = {
     0x60c2, // 18: out    isr, 2                     
     0x4002, // 19: in     pins, 2                    
     0xa086, // 20: mov    exec, isr                  
-    0xc000, // 21: irq    nowait 0                   
-    0x0011, // 22: jmp    17                         
-    0xc001, // 23: irq    nowait 1                   
+    0xa026, // 21: mov    x, isr                     
+    0x8000, // 22: push   noblock                    
+    0xa0c1, // 23: mov    isr, x                     
             //     .wrap
 };
 
