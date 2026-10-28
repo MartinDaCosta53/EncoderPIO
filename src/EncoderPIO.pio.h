@@ -12,42 +12,41 @@
 // EncoderPIO //
 // ---------- //
 
-#define EncoderPIO_wrap_target 0
-#define EncoderPIO_wrap 23
+#define EncoderPIO_wrap_target 18
+#define EncoderPIO_wrap 22
 
 static const uint16_t EncoderPIO_program_instructions[] = {
-            //     .wrap_target
-    0x0011, //  0: jmp    17                         
-    0x0015, //  1: jmp    21                         
-    0x0015, //  2: jmp    21                         
-    0x0011, //  3: jmp    17                         
-    0x0015, //  4: jmp    21                         
-    0x0011, //  5: jmp    17                         
-    0x0011, //  6: jmp    17                         
-    0x0015, //  7: jmp    21                         
-    0x0015, //  8: jmp    21                         
-    0x0011, //  9: jmp    17                         
-    0x0011, // 10: jmp    17                         
-    0x0015, // 11: jmp    21                         
-    0x0011, // 12: jmp    17                         
-    0x0015, // 13: jmp    21                         
-    0x0015, // 14: jmp    21                         
-    0x0011, // 15: jmp    17                         
+    0x0012, //  0: jmp    18                         
+    0x0016, //  1: jmp    22                         
+    0x0016, //  2: jmp    22                         
+    0x0012, //  3: jmp    18                         
+    0x0016, //  4: jmp    22                         
+    0x0012, //  5: jmp    18                         
+    0x0012, //  6: jmp    18                         
+    0x0016, //  7: jmp    22                         
+    0x0016, //  8: jmp    22                         
+    0x0012, //  9: jmp    18                         
+    0x0012, // 10: jmp    18                         
+    0x0016, // 11: jmp    22                         
+    0x0012, // 12: jmp    18                         
+    0x0016, // 13: jmp    22                         
+    0x0016, // 14: jmp    22                         
+    0x0012, // 15: jmp    18                         
     0x4002, // 16: in     pins, 2                    
     0xa0e6, // 17: mov    osr, isr                   
+            //     .wrap_target
     0x60c2, // 18: out    isr, 2                     
     0x4002, // 19: in     pins, 2                    
-    0xa086, // 20: mov    exec, isr                  
-    0xa026, // 21: mov    x, isr                     
+    0xa0e6, // 20: mov    osr, isr                   
+    0xa0a6, // 21: mov    pc, isr                    
     0x8000, // 22: push   noblock                    
-    0xa0c1, // 23: mov    isr, x                     
             //     .wrap
 };
 
 #if !PICO_NO_HARDWARE
 static const struct pio_program EncoderPIO_program = {
     .instructions = EncoderPIO_program_instructions,
-    .length = 24,
+    .length = 23,
     .origin = 0,
 };
 
@@ -57,4 +56,3 @@ static inline pio_sm_config EncoderPIO_program_get_default_config(uint offset) {
     return c;
 }
 #endif
-    

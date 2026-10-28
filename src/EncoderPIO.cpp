@@ -13,14 +13,18 @@
 EncoderPIO* EncoderPIO::_instances[3] = { nullptr, nullptr, nullptr };
 
 //---------------------------------------------
-// The PIO program pushes the 4-bit value A'B'AB for every valid step.
+// The PIO program pushes the 4-bit value B'A'BA for every valid step
+// (A = bit 0 and B = bit 1 of each 2-bit sample; ' = previous sample).
 // These masks have bit n set if value n is a step in that direction.
-// What the PIO file calls
-// "clockwise"(0001, 0111, 1000, 1110) increments the position, and what it calls
-// "counter clockwise" (0010, 0100, 1011, 1101) decrements it.
+// A leading B (A rising first) is an increment:
+//   increment: 0001, 0111, 1000, 1110
+//   decrement: 0010, 0100, 1011, 1101
 
 static const uint32_t DEC_MASK = (1u << 0x2) | (1u << 0x4) | (1u << 0xB) | (1u << 0xD);
 static const uint32_t INC_MASK = (1u << 0x1) | (1u << 0x7) | (1u << 0x8) | (1u << 0xE);
+
+// The 16-entry jump table comes first in the program; the code starts after it
+static const uint PC_START_OFFSET = 16;
 
 //---------------------------------------------
 // Helper: system IRQ number for a PIO block and IRQ line (0 or 1)
@@ -42,10 +46,17 @@ static uint pioSystemIrq(uint8_t pioNum, uint irqLine)
   }
 }
 
+// Helper: the interrupt handler for a PIO block (pioNum validated earlier)
+EncoderPIO::IrqHandler EncoderPIO::handlerFor(uint8_t pioNum)
+{
+  return (pioNum == 0) ? pio0_irq_handler :
+         (pioNum == 1) ? pio1_irq_handler : pio2_irq_handler;
+}
+
 //---------------------------------------------
 // Constructors: the number of pins given sets the number of encoders
 
-void EncoderPIO::begin(uint8_t pioNum, uint8_t count)
+void EncoderPIO::configure(uint8_t pioNum, uint8_t count)
 {
   _pioNum = pioNum;
   _numEncoders = count;
@@ -53,20 +64,20 @@ void EncoderPIO::begin(uint8_t pioNum, uint8_t count)
 
 EncoderPIO::EncoderPIO(uint8_t pioNum, uint8_t enc1PinA)
 {
-  begin(pioNum, 1);
+  configure(pioNum, 1);
   _ch[0].pinA = enc1PinA;
 }
 
 EncoderPIO::EncoderPIO(uint8_t pioNum, uint8_t enc1PinA, uint8_t enc2PinA)
 {
-  begin(pioNum, 2);
+  configure(pioNum, 2);
   _ch[0].pinA = enc1PinA;
   _ch[1].pinA = enc2PinA;
 }
 
 EncoderPIO::EncoderPIO(uint8_t pioNum, uint8_t enc1PinA, uint8_t enc2PinA, uint8_t enc3PinA)
 {
-  begin(pioNum, 3);
+  configure(pioNum, 3);
   _ch[0].pinA = enc1PinA;
   _ch[1].pinA = enc2PinA;
   _ch[2].pinA = enc3PinA;
@@ -74,16 +85,22 @@ EncoderPIO::EncoderPIO(uint8_t pioNum, uint8_t enc1PinA, uint8_t enc2PinA, uint8
 
 EncoderPIO::EncoderPIO(uint8_t pioNum, uint8_t enc1PinA, uint8_t enc2PinA, uint8_t enc3PinA, uint8_t enc4PinA)
 {
-  begin(pioNum, 4);
+  configure(pioNum, 4);
   _ch[0].pinA = enc1PinA;
   _ch[1].pinA = enc2PinA;
   _ch[2].pinA = enc3PinA;
   _ch[3].pinA = enc4PinA;
 }
 
+EncoderPIO::~EncoderPIO()
+{
+  end();
+}
+
 //---------------------------------------------
 // Returns true on success, false if the encoders could not be started.
 // Safe to call more than once: later calls return true without doing anything.
+// After end(), it can be called again to restart the encoders.
 
 bool EncoderPIO::initialiseEncoder()
 {
@@ -95,14 +112,14 @@ bool EncoderPIO::initialiseEncoder()
   switch (_pioNum)
   {
   case 0:
-    pio = pio0;
+    _pio = pio0;
     break;
   case 1:
-    pio = pio1;
+    _pio = pio1;
     break;
 #if PICO_RP2350
   case 2:
-    pio = pio2;
+    _pio = pio2;
     break;
 #endif
   default:
@@ -124,8 +141,22 @@ bool EncoderPIO::initialiseEncoder()
     }
   }
 
-  // The program uses "mov exec" with raw jmp opcodes, so it MUST load at offset 0
-  if (!pio_can_add_program_at_offset(pio, &EncoderPIO_program, 0))
+  // The {A, A+1} pin pairs must not overlap (this also rejects the same pin used twice)
+  for (uint8_t i = 0; i < _numEncoders; i++)
+  {
+    for (uint8_t j = i + 1; j < _numEncoders; j++)
+    {
+      int diff = (int)_ch[i].pinA - (int)_ch[j].pinA;
+      if (diff > -2 && diff < 2)
+      {
+        return false;
+      }
+    }
+  }
+
+  // The program jumps into a table at absolute addresses 0 to 15 ("mov pc, isr"),
+  // so it MUST load at offset 0
+  if (!pio_can_add_program_at_offset(_pio, &EncoderPIO_program, 0))
   {
     return false;  // offset 0 already used by another program on this PIO
   }
@@ -133,12 +164,12 @@ bool EncoderPIO::initialiseEncoder()
   // Claim one free state machine per encoder, or give them all back and fail
   for (uint8_t i = 0; i < _numEncoders; i++)
   {
-    int sm = pio_claim_unused_sm(pio, false);
+    int sm = pio_claim_unused_sm(_pio, false);
     if (sm < 0)
     {
       for (uint8_t j = 0; j < i; j++)
       {
-        pio_sm_unclaim(pio, _ch[j].sm);
+        pio_sm_unclaim(_pio, _ch[j].sm);
       }
       return false;  // not enough free state machines on this PIO
     }
@@ -146,48 +177,122 @@ bool EncoderPIO::initialiseEncoder()
   }
 
   // One copy of the program is shared by all the state machines
-  _offset = pio_add_program_at_offset(pio, &EncoderPIO_program, 0);
+  _offset = pio_add_program_at_offset(_pio, &EncoderPIO_program, 0);
 
   for (uint8_t i = 0; i < _numEncoders; i++)
   {
     Channel& ch = _ch[i];
 
-    // Pins
-    pio_gpio_init(pio, ch.pinA);
-    gpio_set_pulls(ch.pinA, true, false);
-    pio_gpio_init(pio, ch.pinA + 1);
-    gpio_set_pulls(ch.pinA + 1, true, false);
+    // Pins: handed to the PIO, explicitly inputs, pulls set below
+    pio_gpio_init(_pio, ch.pinA);
+    pio_gpio_init(_pio, ch.pinA + 1);
+    pio_sm_set_consecutive_pindirs(_pio, ch.sm, ch.pinA, 2, false);
 
     // State machine setup
     pio_sm_config c = EncoderPIO_program_get_default_config(_offset);
     sm_config_set_in_pin_base(&c, ch.pinA);
     sm_config_set_in_shift(&c, false, false, 0);
     sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_RX);  // 8-deep RX FIFO, nothing is sent to the TX FIFO
-    pio_sm_init(pio, ch.sm, _offset + 16, &c);      // program starts after the 16-entry jump table
+    pio_sm_init(_pio, ch.sm, _offset + PC_START_OFFSET, &c);
   }
+
+  applyPulls();
 
   // Register the object, then enable the FIFO "not empty" interrupt of each state machine
   _instances[_pioNum] = this;
 
   for (uint8_t i = 0; i < _numEncoders; i++)
   {
-    pio_set_irq0_source_enabled(pio,
+    pio_set_irq0_source_enabled(_pio,
         static_cast<enum pio_interrupt_source>(pis_sm0_rx_fifo_not_empty + _ch[i].sm), true);
   }
 
-  void (*handler)() = (_pioNum == 0) ? pio0_irq_handler :
-                      (_pioNum == 1) ? pio1_irq_handler : pio2_irq_handler;
   uint irq0 = pioSystemIrq(_pioNum, 0);
-  irq_add_shared_handler(irq0, handler, PICO_SHARED_IRQ_HANDLER_DEFAULT_ORDER_PRIORITY);
+  irq_add_shared_handler(irq0, handlerFor(_pioNum), PICO_SHARED_IRQ_HANDLER_DEFAULT_ORDER_PRIORITY);
   irq_set_enabled(irq0, true);
 
   for (uint8_t i = 0; i < _numEncoders; i++)
   {
-    pio_sm_set_enabled(pio, _ch[i].sm, true);
+    pio_sm_set_enabled(_pio, _ch[i].sm, true);
   }
 
   _initialised = true;
   return true;
+}
+
+//---------------------------------------------
+// Stops the encoders and gives back everything initialiseEncoder() took:
+// state machines, program space, interrupt handler and pins (left as plain
+// inputs with the pulls off). Positions and settings are kept. Safe to call
+// more than once, and called by the destructor. Call it from the core that
+// called initialiseEncoder().
+
+void EncoderPIO::end()
+{
+  if (!_initialised)
+  {
+    return;
+  }
+
+  // Stop the state machines and their interrupt sources first, so nothing new can arrive
+  for (uint8_t i = 0; i < _numEncoders; i++)
+  {
+    pio_sm_set_enabled(_pio, _ch[i].sm, false);
+    pio_set_irq0_source_enabled(_pio,
+        static_cast<enum pio_interrupt_source>(pis_sm0_rx_fifo_not_empty + _ch[i].sm), false);
+  }
+
+  // Remove our handler; only switch the IRQ off if nobody else is sharing it
+  uint irq0 = pioSystemIrq(_pioNum, 0);
+  irq_remove_handler(irq0, handlerFor(_pioNum));
+  if (!irq_has_shared_handler(irq0))
+  {
+    irq_set_enabled(irq0, false);
+  }
+  _instances[_pioNum] = nullptr;
+
+  // Hand back the pins as plain inputs with the pulls off
+  for (uint8_t i = 0; i < _numEncoders; i++)
+  {
+    gpio_init(_ch[i].pinA);
+    gpio_set_pulls(_ch[i].pinA, false, false);
+    gpio_init(_ch[i].pinA + 1);
+    gpio_set_pulls(_ch[i].pinA + 1, false, false);
+  }
+
+  // Give back the state machines and the program
+  for (uint8_t i = 0; i < _numEncoders; i++)
+  {
+    pio_sm_clear_fifos(_pio, _ch[i].sm);
+    pio_sm_unclaim(_pio, _ch[i].sm);
+    _ch[i].subCount = 0;
+  }
+  pio_remove_program(_pio, &EncoderPIO_program, _offset);
+
+  _initialised = false;
+}
+
+//---------------------------------------------
+// Pull-ups on A and B of every encoder (pull-downs are never used).
+// Takes effect immediately if the encoders are already running, otherwise
+// when initialiseEncoder() runs.
+
+void EncoderPIO::setPullUps(bool enable)
+{
+  _pullUps = enable;
+  if (_initialised)
+  {
+    applyPulls();
+  }
+}
+
+void EncoderPIO::applyPulls()
+{
+  for (uint8_t i = 0; i < _numEncoders; i++)
+  {
+    gpio_set_pulls(_ch[i].pinA, _pullUps, false);
+    gpio_set_pulls(_ch[i].pinA + 1, _pullUps, false);
+  }
 }
 
 //---------------------------------------------
@@ -218,15 +323,15 @@ __not_in_flash("EncoderPIO") void EncoderPIO::pio2_irq_handler()
 }
 
 // Empties the RX FIFO of every encoder's state machine. Each word is the
-// A'B'AB value of one step; the interrupt stays asserted until the FIFO is empty.
+// B'A'BA value of one step; the interrupt stays asserted until the FIFO is empty.
 __not_in_flash("EncoderPIO") void EncoderPIO::serviceFifos()
 {
   for (uint8_t i = 0; i < _numEncoders; i++)
   {
     Channel& ch = _ch[i];
-    while (!pio_sm_is_rx_fifo_empty(pio, ch.sm))
+    while (!pio_sm_is_rx_fifo_empty(_pio, ch.sm))
     {
-      uint32_t v = pio_sm_get(pio, ch.sm) & 0xF;
+      uint32_t v = pio_sm_get(_pio, ch.sm) & 0xF;
       if ((DEC_MASK >> v) & 1u)
       {
         decPos(ch);
