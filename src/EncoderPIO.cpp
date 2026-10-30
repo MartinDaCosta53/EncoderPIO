@@ -4,6 +4,7 @@
 
 #include "hardware/irq.h"
 #include "hardware/sync.h"
+#include "hardware/clocks.h"   
 #include "EncoderPIO.h"
 #include "EncoderPIO.pio.h"
 
@@ -25,6 +26,38 @@ static const uint32_t INC_MASK = (1u << 0x1) | (1u << 0x7) | (1u << 0x8) | (1u <
 
 // The 16-entry jump table comes first in the program; the code starts after it
 static const uint PC_START_OFFSET = 16;
+
+// Worst-case PIO cycles per sample: 5 on the no-change path
+// (out, in, mov, mov pc, jmp), 6 on the path that pushes a step.
+// The real idle sampling rate is therefore up to 20% above the requested one.
+static const uint32_t CYCLES_PER_SAMPLE = 6;
+
+float EncoderPIO::clockDivider() const
+{
+  float div = (float)clock_get_hz(clk_sys) / ((float)_sampleRateHz * CYCLES_PER_SAMPLE);
+  if (div < 1.0f)     div = 1.0f;       // PIO divider limits: 1 to 65536
+  if (div > 65535.0f) div = 65535.0f;
+  return div;
+}
+
+bool EncoderPIO::setSampleRate(uint32_t hz)
+{
+  if (hz == 0)
+  {
+    return false;
+  }
+  _sampleRateHz = hz;
+
+  if (_initialised)
+  {
+    float div = clockDivider();
+    for (uint8_t i = 0; i < _numEncoders; i++)
+    {
+      pio_sm_set_clkdiv(_pio, _ch[i].sm, div);   // safe while the SM is running
+    }
+  }
+  return true;
+}
 
 //---------------------------------------------
 // Helper: system IRQ number for a PIO block and IRQ line (0 or 1)
@@ -191,7 +224,9 @@ bool EncoderPIO::initialiseEncoder()
     // State machine setup
     pio_sm_config c = EncoderPIO_program_get_default_config(_offset);
     sm_config_set_in_pin_base(&c, ch.pinA);
-    sm_config_set_in_shift(&c, false, false, 0);
+    sm_config_set_in_shift(&c, false, false, 32);
+    sm_config_set_out_shift(&c, true, false, 32);
+    sm_config_set_clkdiv(&c, clockDivider());
     sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_RX);  // 8-deep RX FIFO, nothing is sent to the TX FIFO
     pio_sm_init(_pio, ch.sm, _offset + PC_START_OFFSET, &c);
   }

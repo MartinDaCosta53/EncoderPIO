@@ -1,0 +1,49 @@
+; Quadrature encoder decoder.
+
+.program EncoderPIO
+.origin 0        ; The jump table has to start at 0.
+                 ; It contains the correct jumps for each of the 16
+                 ; combinations of the 4 bits B'A'BA:
+                 ; A  = current reading of pin_A (bit 0), A' = previous reading
+                 ; B  = current reading of pin_B (bit 1), B' = previous reading
+                 ; (pin_B is the GPIO after pin_A; "in pins, 2" puts pin_A in the
+                 ; low bit.) A step with A leading B is an increment.
+                 ;
+                 ; Each valid step pushes its B'A'BA value into the RX FIFO of
+                 ; its own state machine; the CPU decodes the direction.
+
+    jmp read     ; 0000 = no change
+    jmp send     ; 0001 = increment
+    jmp send     ; 0010 = decrement
+    jmp read     ; 0011 = error
+
+    jmp send     ; 0100 = decrement
+    jmp read     ; 0101 = no change
+    jmp read     ; 0110 = error
+    jmp send     ; 0111 = increment
+
+    jmp send     ; 1000 = increment
+    jmp read     ; 1001 = error
+    jmp read     ; 1010 = no change
+    jmp send     ; 1011 = decrement
+
+    jmp read     ; 1100 = error
+    jmp send     ; 1101 = decrement
+    jmp send     ; 1110 = increment
+    jmp read     ; 1111 = no change
+
+pc_start:        ; entry point
+    in pins, 2   ; ISR = current BA
+    mov osr, isr ; OSR holds the "previous" BA for the first pass
+
+.wrap_target
+read:
+    out isr, 2   ; ISR = 000...00B'A' (previous BA taken from the OSR; all other ISR bits cleared)
+    in pins, 2   ; ISR = 000...B'A'BA (shift left by 2, OR in current BA)
+    mov osr, isr ; keep a copy in the OSR: its low 2 bits (BA) are the next "previous"
+    mov pc, isr  ; jump to the table at address B'A'BA
+send:            ; a valid step was detected; ISR holds B'A'BA
+    push noblock ; send B'A'BA to the CPU (dropped if the RX FIFO is full).
+                 ; The OSR already holds the current BA, so the ISR can be
+                 ; cleared by the push with nothing to save or restore.
+.wrap            ; wraps to read

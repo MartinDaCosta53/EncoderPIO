@@ -1,0 +1,26 @@
+#######################################
+# Syntax Coloring Map For EncoderPIO
+#######################################
+
+#######################################
+# Datatypes (KEYWORD1)
+#######################################
+
+EncoderPIO	KEYWORD1
+
+
+#######################################
+# Methods and Functions (KEYWORD2)
+#######################################
+
+getPosition		KEYWORD2
+setPosition		KEYWORD2
+setLimits		KEYWORD2
+setWrap 		KEYWORD2
+setCountsPerDetent	KEYWORD2
+
+#######################################
+# Constants (LITERAL1)
+#######################################
+
+

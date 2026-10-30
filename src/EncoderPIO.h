@@ -23,6 +23,7 @@ class EncoderPIO
 {
 public:
   static constexpr uint8_t MAX_ENCODERS = 4;
+  static constexpr uint32_t DEFAULT_SAMPLE_RATE_HZ = 1000000;
 
   EncoderPIO(uint8_t pioNum, uint8_t enc1PinA);
   EncoderPIO(uint8_t pioNum, uint8_t enc1PinA, uint8_t enc2PinA);
@@ -37,6 +38,13 @@ public:
   bool initialiseEncoder();                                      // true on success; check the result
   void end();                                                    // stops the encoders and releases the PIO resources; safe to call more than once
   void setPullUps(bool enable);                                  // internal pull-ups on A and B (default true); may be called before or after initialiseEncoder()
+  
+  // Pin-sampling rate of the PIO program, in Hz (default 1 MHz). May be called
+  // before or after initialiseEncoder(). Returns false (no change) if hz is 0.
+  // Values the divider can't reach are clamped: the maximum is about
+  // clk_sys / 6, the minimum a few hundred Hz. Applies to all encoders on this
+  // object. If you change clk_sys later, call this again to recompute the divider.
+  bool setSampleRate(uint32_t hz);
 
   int  getPosition() { return getPosition(0); }
   int  getPosition(uint8_t encoder);                             // 0 if the index is invalid
@@ -65,6 +73,9 @@ private:
     bool    wrap   = false;
     volatile uint8_t countsPerDetent = 1;
   };
+  
+  float clockDivider() const;
+  uint32_t _sampleRateHz = DEFAULT_SAMPLE_RATE_HZ;
 
   // Static so they can be registered with irq_add_shared_handler().
   // One per PIO block, so two blocks never drain the same FIFOs.
