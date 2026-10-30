@@ -4,10 +4,13 @@ A quadrature rotary encoder library for the Raspberry Pi **RP2040** and **RP2350
 
 One `EncoderPIO` object drives **1 to 4 encoders** on a single PIO block, using one state machine per encoder. Position, limits, wrapping and detent handling are done for you, so reading an encoder is a single call to `getPosition()`.
 
+Any of the PIO may be used allowing up to 8 encoders to be decoded with the **RP2040** and up to 12 on the **RP2350**.
+
 ## Features
 
 - Hardware decoding in PIO: the CPU is only interrupted when a valid step happens
 - 1 to 4 encoders per object, one state machine each
+- All PIo can be used as individual objects for decoding
 - Per-encoder position, minimum/maximum limits and optional wrap-around
 - Configurable counts per detent (1, 2 or 4 edges per step for common encoders)
 - Invalid transitions (contact bounce, glitches) are ignored by the PIO program
