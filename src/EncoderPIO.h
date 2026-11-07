@@ -71,7 +71,7 @@ private:
     int     minPos = 0;
     int     maxPos = 100;
     bool    wrap   = false;
-    volatile uint8_t countsPerDetent = 1;
+    uint8_t countsPerDetent = 1;
   };
   
   float clockDivider() const;

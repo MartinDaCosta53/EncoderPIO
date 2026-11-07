@@ -48,56 +48,58 @@ const byte VER_MAJ = 0;   // code major version
 const byte VER_MIN = 0;   // code minor version
 const byte VER_PATCH = 0; // code sub-version
 
-const byte PIN_ENC1A = 15;  // Number is GPIO reference
-const byte PIN_ENC1B = 16;  // Must be consecutive to PIN_ENC1A
-const byte PIN_ENC2A = 18;  // Number is GPIO reference
-const byte PIN_ENC2B = 19;  // Must be consecutive to PIN_ENC2A
-const byte PIN_ENC3A = 13;  // Number is GPIO reference
-const byte PIN_ENC3B = 14;  // Must be consecutive to PIN_ENC3A
+//---------------------------------------------
+// Encoder pins
+//
+// List the GPIO of the A signal of each encoder; B must be on the next GPIO,
+// so each encoder uses a pair {A, A+1} and the pairs must not overlap.
+// The position in this list is the encoder number used in the output below.
+// The encoder pins do not have to be contiguous or increasing as long as they 
+// conform with the requirements in the first sentence of this comment block.
+//
+// This list has 6 entries but can be shrunk or expanded up to the maximum capacity
+// Capacity: 4 encoders per PIO block (one state machine each)
+//   RP2040: 2 PIO blocks = 8 encoders
+//   RP2350: 3 PIO blocks = 12 encoders
 
-byte PIO_0 = 0;
-byte PIO_1 = 1;
+const byte ENCODER_PINS[] = { 9, 11, 13, 15, 17, 19 };
+const byte NUM_ENCODERS = sizeof(ENCODER_PINS) / sizeof(ENCODER_PINS[0]);
 
-// Up to 4 encoders can be assigned to a single object.  They will all be on the same PIO.
-// Additional encoders can be added in a new object that must use a different PIO.
-// Each encoder must have a pair of adjacent GPIO. GPIO cannot be reused.
-EncoderPIO groupA(PIO_0, PIN_ENC1A, PIN_ENC2A);
-EncoderPIO groupB(PIO_1, PIN_ENC3A);
-
-static const uint8_t NUM_ENCODERS = 3;
-
-int lastPos[NUM_ENCODERS];
+int oldPos[NUM_ENCODERS];
 int newPos[NUM_ENCODERS];
-
-// Small helpers so the rest of the code can use a single index 0..5
-static int encGet(uint8_t n)
-{
-  return (n < 2) ? groupA.getPosition(n) : groupB.getPosition(n - 2);
-}
-
-static void encSetup(uint8_t n, int minPos, int maxPos, bool wrap, uint8_t countsPerDetent)
-{
-  EncoderPIO& g = (n < 2) ? groupA : groupB;
-  uint8_t idx = (n < 2) ? n : n - 2;
-
-  g.setLimits(idx, minPos, maxPos);
-  g.setWrap(idx, wrap);
-  g.setCountsPerDetent(idx, countsPerDetent);
-  g.setPosition(idx, minPos);
-}
-
-void printConfig(void)
-{
-  // code version
-  Serial << F("> code version: ") << VER_MAJ << F(".") << VER_MIN << F(".") << VER_PATCH << endl;
-  Serial << F("> compiled on ") << __DATE__ << F(" at ") << __TIME__ << F(", compiler ver = ") << __cplusplus << endl;
-
-  // copyright
-  Serial << F("> © Martin Da Costa (MERG M6223) 2026") << endl
-         << endl;
-}
-
+int minPos[NUM_ENCODERS] = {-10, 0, 0, 0, -180, 0};
+int maxPos[NUM_ENCODERS] = {10, 100, 255, 360, 180, 100};
+bool wrap[NUM_ENCODERS] = {false, true, false, true, true, false};
 byte edgesPerDetent = 2;
+
+//---------------------------------------------
+// PIO allocation: encoders fill one PIO block completely (4 state machines)
+// before the next block is used. Encoder i lives on PIO block i / 4 as
+// encoder number i % 4 within that block's EncoderPIO object.
+
+const byte ENC_PER_PIO = EncoderPIO::MAX_ENCODERS;                      // 4
+const byte PIOS_USED = (NUM_ENCODERS + ENC_PER_PIO - 1) / ENC_PER_PIO;  // PIO blocks actually needed
+
+EncoderPIO* blocks[PIOS_USED];   // one EncoderPIO object per PIO block used
+
+// Creates the EncoderPIO object for one PIO block, handling 1 to 4 encoders
+EncoderPIO* makeBlock(byte pioNum, byte first, byte count)
+{
+  const byte* p = &ENCODER_PINS[first];
+  switch (count)
+  {
+  case 1: return new EncoderPIO(pioNum, p[0]);
+  case 2: return new EncoderPIO(pioNum, p[0], p[1]);
+  case 3: return new EncoderPIO(pioNum, p[0], p[1], p[2]);
+  case 4: return new EncoderPIO(pioNum, p[0], p[1], p[2], p[3]);
+  default: return nullptr;
+  }
+}
+
+// helpers so the rest of the code can use a single index i
+EncoderPIO& blockFor(byte i) { return *blocks[i / ENC_PER_PIO]; } // Finds the PIO block for encoder i
+byte        indexIn(byte i)  { return i % ENC_PER_PIO; }  // Finds the encoder within the PIO
+
 bool encReady = false;
 
 void setup()
@@ -108,51 +110,69 @@ void setup()
   Serial << F("> PIO example for multiple encoders on multiple PIOs") << endl << endl;
   printConfig();  // show code version and copyright notice 
   
-  // Configure before or after initialiseEncoder(); both work.
-  // 4 edges per detent is the common type of mechanical encoder.
-  encSetup(0, 0, 100, false, edgesPerDetent);   // 0..100, stops at the ends
-  encSetup(1, 0, 255, false, edgesPerDetent);   // 0..255, e.g. a brightness
-  encSetup(2, 0, 11,  true,  edgesPerDetent);   // 0..11, wraps round, e.g. a menu
-   
-  // Always check the result: it fails if a pin is invalid or overlaps,
-  // the PIO block is already in use, or there are not enough free
-  // state machines.
-  if (!groupA.initialiseEncoder())
+  // Build and start one EncoderPIO object per PIO block, filling each block before using the next
+  for (byte b = 0; b < PIOS_USED; b++)
   {
-    Serial.println("Encoder group A (PIO0) failed to start");
-    while (true) { delay(1000); }
+    byte first = b * ENC_PER_PIO;
+    byte count = min((int)ENC_PER_PIO, (int)NUM_ENCODERS - first);
+
+    blocks[b] = makeBlock(b, first, count);
+
+    if (blocks[b] && blocks[b]->initialiseEncoder())
+    {
+      Serial << F("> PIO") << b << F(": ") << count << F(" encoder(s) initialised (encoders ")
+             << first << F(" to ") << (first + count - 1) << F(")") << endl;
+    }
+    else
+    {
+      Serial << F("> PIO") << b << F(": failed to initialise") << endl;
+      while (true) { }
+    }
   }
-  if (!groupB.initialiseEncoder())
+  encReady = true;
+  
+  // Configure every encoder
+  for (byte i = 0; i < NUM_ENCODERS; i++)
   {
-    Serial.println("Encoder group B (PIO1) failed to start");
-    while (true) { delay(1000); }
+    EncoderPIO& blk = blockFor(i);
+    byte idx = indexIn(i);
+
+    newPos[i] = 0;
+    oldPos[i] = 0;
+
+    bool limitsValid = blk.setLimits(idx, minPos[i], maxPos[i]); // returns false if min >= max
+    if (!limitsValid)
+    {
+      Serial << F("> Encoder ") << i << F(": invalid limits") << endl;
+    }
+    blk.setPosition(idx, newPos[i]);
+    blk.setWrap(idx, wrap[i]);
+    blk.setCountsPerDetent(idx, edgesPerDetent);
   }
 
-  for (uint8_t i = 0; i < NUM_ENCODERS; i++)
-  {
-    lastPos[i] = encGet(i);
-  }
-  
-  encReady = true;
-  Serial.println("3 encoders running");
+  Serial << endl << F("> All encoders at initialisation position.") << endl;
 }
 
 void loop()
 {
   if (!encReady) return;
-  bool change = false;
-  for (uint8_t i = 0; i < NUM_ENCODERS; i++)
+
+  for (byte i = 0; i < NUM_ENCODERS; i++)
   {
-    int p = encGet(i);
-    if (p != lastPos[i])
-    {
-      newPos[i] = p;
-      lastPos[i] = p;
-      change = true;
+    newPos[i] = blockFor(i).getPosition(indexIn(i));
+    if (newPos[i] != oldPos[i]) {
+      Serial << F("> Encoder ") << i << F(" position = ") << newPos[i] << endl;
+      oldPos[i] = newPos[i];
     }
   }
-  if (change)
-  {
-    Serial << F("> Encoder 1 = ") << newPos[0] << F(", Encoder 2 = ") << newPos[1] << F(", Encoder 3 = ") << newPos[2] << endl;
-  }
+}
+
+void printConfig(void) {
+  // code version
+  Serial << F("> code version: ") << VER_MAJ << F(".") << VER_MIN << F(".") << VER_PATCH << endl;
+  Serial << F("> compiled on ") << __DATE__ << F(" at ") << __TIME__ << F(", compiler ver = ") << __cplusplus << endl;
+
+  // copyright
+  Serial << F("> © Martin Da Costa (MERG M6223) 2026") << endl
+         << endl;
 }

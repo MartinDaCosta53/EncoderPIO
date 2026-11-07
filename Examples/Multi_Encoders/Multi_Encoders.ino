@@ -50,15 +50,15 @@ const byte VER_PATCH = 0; // code sub-version
 
 const byte PIN_ENC1A = 15;  // Number is GPIO reference
 const byte PIN_ENC1B = 16;  // Must be consecutive to PIN_ENC_A
-const byte PIN_ENC2A = 18;  // Number is GPIO reference
-const byte PIN_ENC2B = 19;  // Must be consecutive to PIN_ENC_A
+const byte PIN_ENC2A = 17;  // Number is GPIO reference
+const byte PIN_ENC2B = 18;  // Must be consecutive to PIN_ENC_A
 const byte PIN_ENC3A = 13;  // Number is GPIO reference
 const byte PIN_ENC3B = 14;  // Must be consecutive to PIN_ENC_A
 
 byte encoderPIO = 0;
 
 // Up to 4 encoders can be assigned to a single object.  They will all be on the same PIO.
-// Additional encoders can be added in a new object that must use a different PIO.
+// Additional encoders can be added in a new object that will then use a different PIO.
 // Each encoder must have a pair of adjacent GPIO. GPIO cannot be reused.
 EncoderPIO encGrp(encoderPIO, PIN_ENC1A, PIN_ENC2A, PIN_ENC3A);
 

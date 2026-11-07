@@ -144,7 +144,7 @@ When the position moves, it respects the limits. At a limit the position either 
 - **Bad indices.** Invalid indices never crash: getters return 0, setters do nothing, and `setLimits` returns `false`.
 - **Thread safety with the interrupt.** `setPosition`, `setLimits` and `setCountsPerDetent` briefly disable interrupts while they change several related values together, and they reset `subCount` so a stale partial detent cannot carry over. `getPosition` reads one `volatile int` and needs no lock.
 - **Limits.** `setLimits` rejects `maxPos <= minPos`, and clamps the current position into the new range.
-- **Counts per detent.** Values below 1 are treated as 1 and values above 100 as 100. The cap keeps `subCount` (an `int8_t`) from overflowing.
+- **Counts per detent.** Values below 1 are treated as 1 and values above 100 as 100. The cap keeps `subCount` (an `int8_t`) from overflowing but realistically the value is most likely to be 1, 2 or 4.
 - **Pull-ups.** On by default, and can be changed before or after start-up. Pull-downs are never used.
 - **Sample rate.** `setSampleRate()` recalculates the divider as `clk_sys / (rate × 6)`, clamped to the PIO divider range of 1 to 65535, and updates running state machines immediately. If the system clock changes later, call it again.
 
