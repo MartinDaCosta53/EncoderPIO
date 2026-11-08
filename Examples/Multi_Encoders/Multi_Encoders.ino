@@ -44,7 +44,7 @@
 #include <Streaming.h>
 #include <EncoderPIO.h>
 
-const byte VER_MAJ = 0;   // code major version
+const byte VER_MAJ = 1;   // code major version
 const byte VER_MIN = 0;   // code minor version
 const byte VER_PATCH = 0; // code sub-version
 
