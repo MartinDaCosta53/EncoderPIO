@@ -69,7 +69,10 @@ int oldPos[NUM_ENCODERS];
 int newPos[NUM_ENCODERS];
 int minPos[NUM_ENCODERS] = {-10, 0, 0, 0, -180, 0};
 int maxPos[NUM_ENCODERS] = {10, 100, 255, 360, 180, 100};
+int steps[NUM_ENCODERS] = {1, 5, 10, 6, 1, 4};
 bool wrap[NUM_ENCODERS] = {false, true, false, true, true, false};
+bool ends[NUM_ENCODERS] = {false, true, false, false, false, true};
+
 byte edgesPerDetent = 2;
 
 //---------------------------------------------
@@ -146,7 +149,9 @@ void setup()
       Serial << F("> Encoder ") << i << F(": invalid limits") << endl;
     }
     blk.setPosition(idx, newPos[i]);
+    blk.setStep(idx, steps[i]);
     blk.setWrap(idx, wrap[i]);
+    blk.setWrapEndsDistinct(idx, ends[i]);
     blk.setCountsPerDetent(idx, edgesPerDetent);
   }
 

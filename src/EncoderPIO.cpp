@@ -382,8 +382,59 @@ __not_in_flash("EncoderPIO") void EncoderPIO::serviceFifos()
 //---------------------------------------------
 // Each quadrature edge calls decPos()/incPos(). subCount accumulates edges
 // until a full detent (countsPerDetent edges) has been made, then the
-// position moves by one. Reversing direction part-way through a detent
-// simply cancels the accumulated edges, so there is no jitter.
+// position moves by "step" (default 1). Reversing direction part-way through
+// a detent simply cancels the accumulated edges, so there is no jitter.
+//
+// Without wrap, a move that would pass a limit stops on it. With wrap, the
+// excess carries over past the opposite limit. By default both end values are
+// separate positions, so the circle has (maxPos - minPos + 1) positions (e.g.
+// -180 to +180 with step 5: -178 steps down to +178, and with step 1 a move
+// from one limit goes straight to the other). With setWrapEndsDistinct(false)
+// minPos and maxPos are the same point on a circle of (maxPos - minPos)
+// positions (the same example gives +177).
+
+// Moves a position by "step" up (forward = true) or down within
+// [minPos, maxPos] and returns the new position. 32-bit only. pos must be
+// within the limits and maxPos > minPos (both are enforced by the setters).
+// The distances are computed as unsigned values, which are exact even when
+// the range is wider than INT_MAX. A division is only needed in the rare case
+// that the step is at least a whole range, so the usual path has none.
+__not_in_flash("EncoderPIO") static int movePosition(int pos, uint16_t step, bool forward, int minPos, int maxPos, bool wrap, bool distinct)
+{
+  uint32_t room = forward ? ((uint32_t)maxPos - (uint32_t)pos)
+                          : ((uint32_t)pos - (uint32_t)minPos);
+
+  if (step <= room)
+  {
+    // Stays inside the limits (this includes landing exactly on one)
+    return forward ? (int)((uint32_t)pos + step) : (int)((uint32_t)pos - step);
+  }
+  if (!wrap)
+  {
+    return forward ? maxPos : minPos;
+  }
+
+  // Passed the limit by (step - room), 1 to 65535. Continue from the other end.
+  // With distinct ends, the first position past a limit is the opposite limit
+  // itself, so one position is skipped: the lap has range + 1 positions.
+  // (INT_MIN to INT_MAX would make range + 1 overflow to 0, so that one range
+  // always uses shared ends.)
+  uint32_t range  = (uint32_t)maxPos - (uint32_t)minPos;
+  uint32_t skip   = (distinct && range != 0xFFFFFFFFu) ? 1 : 0;
+  uint32_t period = range + skip;
+  uint32_t e      = (step - room) - skip;   // 0 or more
+
+  if (e >= period)
+  {
+    e %= period;
+    if (e == 0 && skip == 0)
+    {
+      return minPos;   // shared ends: a whole lap ends where it started
+    }
+  }
+  return forward ? (int)((uint32_t)minPos + e)
+                 : (int)((uint32_t)maxPos - e);
+}
 
 __not_in_flash("EncoderPIO") void EncoderPIO::decPos(Channel& ch)
 {
@@ -395,13 +446,9 @@ __not_in_flash("EncoderPIO") void EncoderPIO::decPos(Channel& ch)
   ch.subCount = 0;
 
   int pos = ch.position;
-  if (pos > ch.minPos)
+  if (pos > ch.minPos || ch.wrap)
   {
-    ch.position = pos - 1;
-  }
-  else if (ch.wrap)
-  {
-    ch.position = ch.maxPos;
+    ch.position = movePosition(pos, ch.step, false, ch.minPos, ch.maxPos, ch.wrap, ch.wrapEndsDistinct);
   }
 }
 
@@ -415,13 +462,9 @@ __not_in_flash("EncoderPIO") void EncoderPIO::incPos(Channel& ch)
   ch.subCount = 0;
 
   int pos = ch.position;
-  if (pos < ch.maxPos)
+  if (pos < ch.maxPos || ch.wrap)
   {
-    ch.position = pos + 1;
-  }
-  else if (ch.wrap)
-  {
-    ch.position = ch.minPos;
+    ch.position = movePosition(pos, ch.step, true, ch.minPos, ch.maxPos, ch.wrap, ch.wrapEndsDistinct);
   }
 }
 
@@ -485,6 +528,17 @@ void EncoderPIO::setWrap(uint8_t encoder, bool wrap)
   _ch[encoder].wrap = wrap;
 }
 
+// Wrap behaviour at the limits (see the comment above movePosition()):
+// true (default) = minPos and maxPos are separate positions, false = the same point.
+void EncoderPIO::setWrapEndsDistinct(uint8_t encoder, bool distinct)
+{
+  if (encoder >= _numEncoders)
+  {
+    return;
+  }
+  _ch[encoder].wrapEndsDistinct = distinct;
+}
+
 // Number of quadrature edges per position step.
 //   1 = every edge counts (4 per full cycle)
 //   2 = for encoders with 2 edges per detent
@@ -504,5 +558,21 @@ void EncoderPIO::setCountsPerDetent(uint8_t encoder, uint8_t counts)
   uint32_t irqState = save_and_disable_interrupts();
   ch.countsPerDetent = counts;
   ch.subCount = 0;
+  restore_interrupts(irqState);
+}
+
+// Amount the position changes for each detent (see setCountsPerDetent()).
+// Default 1. A value of 0 is treated as 1. Without wrap, moves stop at the
+// limits; with wrap, they continue past the opposite limit.
+void EncoderPIO::setStep(uint8_t encoder, uint16_t step)
+{
+  if (encoder >= _numEncoders)
+  {
+    return;
+  }
+  if (step < 1) step = 1;
+
+  uint32_t irqState = save_and_disable_interrupts();
+  _ch[encoder].step = step;
   restore_interrupts(irqState);
 }
