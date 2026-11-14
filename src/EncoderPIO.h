@@ -54,8 +54,18 @@ public:
   bool setLimits(uint8_t encoder, int minPos, int maxPos);       // false if maxPos <= minPos or bad index
   void setWrap(bool wrap) { setWrap(0, wrap); }
   void setWrap(uint8_t encoder, bool wrap);
+  // With wrap on, by default minPos and maxPos are the same point on a circle of
+  // (maxPos - minPos) positions (e.g. -180 to +180: 360 positions, like compass
+  // degrees). Set this true to count both end values as separate positions, so
+  // the circle has (maxPos - minPos + 1) positions and a one-step move from one
+  // limit goes straight to the other. Default false. Has no effect without wrap.
+  void setWrapEndsDistinct(bool distinct) { setWrapEndsDistinct(0, distinct); }
+  void setWrapEndsDistinct(uint8_t encoder, bool distinct);
+
   void setCountsPerDetent(uint8_t counts) { setCountsPerDetent(0, counts); }
   void setCountsPerDetent(uint8_t encoder, uint8_t counts);      // edges per step: 1 (default) to 100; 2 or 4 for common detented encoders
+  void setStep(uint16_t step) { setStep(0, step); }
+  void setStep(uint8_t encoder, uint16_t step);                  // amount the position changes per detent: 1 (default) to 65535
 
 private:
   // State for one encoder
@@ -71,7 +81,9 @@ private:
     int     minPos = 0;
     int     maxPos = 100;
     bool    wrap   = false;
+    bool    wrapEndsDistinct = true; // wrap: count minPos and maxPos as separate positions
     uint8_t countsPerDetent = 1;
+    uint16_t step = 1;                // position change per detent
   };
   
   float clockDivider() const;

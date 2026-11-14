@@ -79,7 +79,11 @@ Each encoder has a `Channel` record containing:
 - The A pin and the state machine number
 - `position` and `subCount`, both `volatile` because the interrupt handler changes them
 - `minPos`, `maxPos` and `wrap` for range handling
-- `countsPerDetent`, also `volatile`
+- `wrapEndsDistinct`, which chooses how wrap treats the two limits (default `true`, see section 5)
+- `countsPerDetent`, the number of edges that make one detent
+- `step`, the amount the position changes per detent (default 1)
+
+The settings (`minPos`, `maxPos`, `wrap`, `wrapEndsDistinct`, `countsPerDetent` and `step`) are only read by the interrupt handler, never changed by it, so they do not need to be `volatile`. The setters that change several related values together briefly disable interrupts (see section 6).
 
 ### Starting: `initialiseEncoder()`
 
@@ -127,7 +131,7 @@ For each word, the lower four bits are examined against two masks, with bit *n* 
 
 A single shift-and-test on the mask tells the handler the direction without any lookup table or branching on individual values.
 
-All the handler code and the counting routines are placed in RAM (`__not_in_flash`), so reading or writing flash from the other core cannot delay them.
+All the handler code and the counting routines, including `movePosition()`, are placed in RAM (`__not_in_flash`), so reading or writing flash from the other core cannot delay them.
 
 ### Counting detents
 
@@ -136,15 +140,48 @@ Each step calls `incPos()` or `decPos()`. These do not move the position straigh
 - Encoders that produce 2 or 4 edges per click only change position once per click.
 - If the encoder reverses direction part-way through a click, the partial edges cancel out, so there is no flicker between neighbouring values.
 
-When the position moves, it respects the limits. At a limit the position either stays put (`wrap` false) or jumps to the opposite limit (`wrap` true).
+Most edges stop here. Only the edge that completes a detent goes on to move the position.
+
+### Moving the position: `movePosition()`
+
+When a detent completes, `incPos()` or `decPos()` calls the helper `movePosition()` to move the position by `step` in the chosen direction, within the limits. Without wrap it takes the move straight to the new position, stopping on a limit if the move would pass it. With wrap, it carries any excess past the opposite limit.
+
+The function works in four stages:
+
+1. **Room to the limit.** It computes `room`, the number of positions between the current position and the limit in the direction of travel (`maxPos - pos` going up, `pos - minPos` going down). Both subtractions are done on `uint32_t` values, which is exact even when the range is wider than `INT_MAX`, so a very wide range cannot overflow.
+2. **Normal case.** If `step <= room`, the move stays inside the range (landing exactly on a limit counts), and the new position is simply `pos ± step`. This is the common path, and it contains no division.
+3. **Passing a limit without wrap.** The position stops on the limit.
+4. **Passing a limit with wrap.** The amount past the limit is `step - room`. The move continues from the opposite end, going round as many laps as needed. A division (modulo) is only used when the step is at least a whole lap, which needs a large step on a small range.
+
+#### How wrap treats the two limits
+
+`wrapEndsDistinct` decides how many positions are in one lap:
+
+- **`true` (default): distinct ends.** `minPos` and `maxPos` are separate positions, so a lap has `maxPos - minPos + 1` positions. The first position past a limit is the opposite limit itself, so one position of the excess is used up by that jump. With a step of 1, one click down from `minPos` gives `maxPos`, and one click up from `maxPos` gives `minPos`.
+- **`false`: shared ends.** `minPos` and `maxPos` are the same point on a circle of `maxPos - minPos` positions, like compass degrees. Nothing is skipped.
+
+Example with a range of -180 to +180, a step of 5, going down from -178 (room is 2, so the excess is 3):
+
+| Setting | Lap length | Calculation | Result |
+|---------|------------|-------------|--------|
+| Distinct ends (default) | 361 | 3 - 1 skipped = 2 past the limit, so +180 - 2 | +178 |
+| Shared ends | 360 | 3 past the limit, so +180 - 3 | +177 |
+
+The one special case is the limit pair `INT_MIN` to `INT_MAX`. The distinct-ends lap length would overflow to 0 there, so that range always uses shared ends. No practical encoder range comes near it.
+
+#### Without wrap
+
+If `wrap` is false, the position stops at the limit, however large the step. A step of 10 on a range of 0 to 100, from 95, gives 100.
 
 ## 6. Public API behaviour
 
 - **Encoder index.** Methods take an index in constructor order. For a single encoder the index can be left out, so single-encoder code needs no changes.
 - **Bad indices.** Invalid indices never crash: getters return 0, setters do nothing, and `setLimits` returns `false`.
-- **Thread safety with the interrupt.** `setPosition`, `setLimits` and `setCountsPerDetent` briefly disable interrupts while they change several related values together, and they reset `subCount` so a stale partial detent cannot carry over. `getPosition` reads one `volatile int` and needs no lock.
-- **Limits.** `setLimits` rejects `maxPos <= minPos`, and clamps the current position into the new range.
-- **Counts per detent.** Values below 1 are treated as 1 and values above 100 as 100. The cap keeps `subCount` (an `int8_t`) from overflowing but realistically the value is most likely to be 1, 2 or 4.
+- **Thread safety with the interrupt.** `setPosition`, `setLimits`, `setCountsPerDetent` and `setStep` briefly disable interrupts while they change values the interrupt handler reads or writes. `setPosition`, `setLimits` and `setCountsPerDetent` also reset `subCount` so a stale partial detent cannot carry over. `setStep` does not reset `subCount`, because changing the size of a step does not invalidate a partly made detent. `setWrap` and `setWrapEndsDistinct` each change a single `bool`, so they need no lock. `getPosition` reads one `volatile int` and needs no lock.
+- **Limits.** `setLimits` rejects `maxPos <= minPos`, and clamps the current position into the new range. The step arithmetic relies on the position always being inside the limits.
+- **Counts per detent.** Values below 1 are treated as 1 and values above 100 as 100. The cap keeps `subCount` (an `int8_t`) from overflowing.
+- **Step.** `setStep` sets how far the position moves per detent, from 1 to 65535. A value of 0 is treated as 1. It combines with counts per detent: counts per detent sets how many edges make a detent, and step sets how far the position moves for each detent.
+- **Wrap.** `setWrap` turns wrap on or off, and `setWrapEndsDistinct` chooses how the two limits count when wrap is on (see section 5). It has no effect while wrap is off.
 - **Pull-ups.** On by default, and can be changed before or after start-up. Pull-downs are never used.
 - **Sample rate.** `setSampleRate()` recalculates the divider as `clk_sys / (rate × 6)`, clamped to the PIO divider range of 1 to 65535, and updates running state machines immediately. If the system clock changes later, call it again.
 
@@ -161,6 +198,9 @@ When the position moves, it respects the limits. At a limit the position either 
 | `push noblock` | The program never stalls if the CPU falls behind; steps are dropped instead |
 | Check-then-claim start-up | A failed start leaves no resources half-allocated |
 | Sub-detent counter | Handles different encoder types and removes jitter on direction changes |
+| Position moved in the interrupt handler | The work per detent is a few dozen instructions with no division on the common path, so moving it out would add a buffer and latency for no real gain |
+| 32-bit unsigned distances in `movePosition()` | Exact for any range, with no 64-bit arithmetic or division on the common path |
+| Distinct ends as the wrap default | Matches the behaviour of earlier releases, so existing code is unchanged |
 
 Limitations to be aware of:
 
@@ -168,3 +208,5 @@ Limitations to be aware of:
 - The B pin must be the GPIO after A.
 - The handler runs on the core that called `initialiseEncoder()`, so start and stop the encoders on the same core.
 - If the CPU does not service the FIFO in time (8 words deep per encoder), steps are lost.
+- The step is limited to 65535.
+- The limits `INT_MIN` to `INT_MAX` always use shared ends when wrapping.

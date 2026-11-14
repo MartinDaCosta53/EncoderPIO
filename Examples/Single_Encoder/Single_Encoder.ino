@@ -59,7 +59,11 @@ int newPos = 0;
 int oldPos = 0;
 int minPos = -10;
 int maxPos = 10;
+int step = 1;
+bool wrap = true;
+bool ends = false;
 byte counts = 2;
+
 bool encReady = false;
 
 void setup() {
@@ -84,8 +88,10 @@ void setup() {
 
   bool limitsValid = encoder.setLimits(minPos, maxPos); // returns false if min >= max
   encoder.setPosition(newPos);
-  encoder.setWrap(false);
-  encoder.setCountsPerDetent(counts);  
+  encoder.setStep(step);
+  encoder.setWrap(wrap);
+  encoder.setWrapEndsDistinct(ends);
+  encoder.setCountsPerDetent(counts); 
 
   Serial << F("> Encoder position = ") << newPos << endl;
 }

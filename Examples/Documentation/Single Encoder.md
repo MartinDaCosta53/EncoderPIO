@@ -57,7 +57,9 @@ The first argument selects which PIO block to use (`0` in this instance). The se
 |---|---|
 | `setLimits(min, max)` | Constrains the position to the range min to max. Returns `false` if `min >= max`. |
 | `setPosition(value)` | Sets the starting position. If this is outside the `min / max` boundaries, the library will move it inside.|
+| `setStep(step)` | Sets the position changes per detent.|
 | `setWrap(false)` | Disables wrap-around, so the position stops at the limits instead of jumping to the opposite end. Set `true` to wrap. |
+| `setWrapEndsDistinct(ends)` | If wrap is true, the default `true` has `minPos` and `maxPos` as seperate positions.  Otherwise, they are the same point on a circle.|
 | `setCountsPerDetent(counts)` | Sets how many quadrature counts make one position step. |
 
 Here the limits are **-10 to +10**, the starting position is **0**, wrapping is off, and there are **2 counts per detent**. Adjust `counts` to match your encoder: common values are 1, 2 or 4, depending on how many quadrature transitions occur per physical click.

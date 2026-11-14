@@ -2,17 +2,17 @@
 
 A quadrature rotary encoder library for the Raspberry Pi **RP2040** and **RP2350**, using the PIO (Programmable I/O) hardware to decode encoders with no CPU polling and no missed edges.
 
-One `EncoderPIO` object drives **1 to 4 encoders** on a single PIO block, using one state machine per encoder. Position, limits, wrapping and detent handling are done for you, so reading an encoder is a single call to `getPosition()`.
-
-Any of the PIO may be used allowing up to 8 encoders to be decoded with the **RP2040** and up to 12 on the **RP2350**.
+One `EncoderPIO` object drives **1 to 4 encoders** on a single PIO block, using one state machine per encoder. Position, limits, step size, wrapping and detent handling are done for you, so reading an encoder is a single call to `getPosition()`.
 
 ## Features
 
 - Hardware decoding in PIO: the CPU is only interrupted when a valid step happens
 - 1 to 4 encoders per object, one state machine each
-- All PIo can be used as individual objects for decoding
 - Per-encoder position, minimum/maximum limits and optional wrap-around
 - Configurable counts per detent (1, 2 or 4 edges per step for common encoders)
+- Configurable step size: each detent can change the position by more than 1
+- Wrap-around carries any excess past the opposite limit, so large steps wrap correctly
+- Choice of how wrap treats the two limits: as separate positions (default) or as the same point, like compass degrees
 - Invalid transitions (contact bounce, glitches) are ignored by the PIO program
 - Reversing part-way through a detent cancels the partial movement, so there is no jitter
 - Adjustable sampling rate (default 1 MHz) that can be changed while running
@@ -38,8 +38,89 @@ Each encoder is identified by the GPIO of its **A** signal. **B must be connecte
 Rules:
 
 - The `{A, A+1}` pairs of different encoders must not overlap. Using GPIO 2 and GPIO 3 as two separate A pins is invalid.
-- To reverse the counting direction, swap A and B by swapping the physical wires .
+- Swap A and B by swapping the physical wires to reverse the counting direction.
 - Common (common-ground) encoders should have their common pin connected to GND. Leave the internal pull-ups enabled.
+
+## Quick start
+
+```cpp
+#include "EncoderPIO.h"
+
+// PIO block 0, one encoder with A on GPIO 2 and B on GPIO 3
+EncoderPIO encoder(0, 2);
+
+void setup()
+{
+  Serial.begin(115200);
+
+  if (!encoder.initialiseEncoder())
+  {
+    Serial.println("Encoder failed to start");
+    while (true) { }
+  }
+
+  encoder.setLimits(0, 100);        // position range
+  encoder.setCountsPerDetent(4);    // 4 edges per click on common encoders
+  encoder.setStep(1);               // position change per click (1 is the default)
+  encoder.setWrap(false);           // stop at the limits
+}
+
+void loop()
+{
+  static int last = -1;
+  int pos = encoder.getPosition();
+  if (pos != last)
+  {
+    last = pos;
+    Serial.println(pos);
+  }
+}
+```
+
+### Several encoders
+
+The order of the pins in the constructor sets the encoder index (0 = first pin, 1 = second, and so on).
+
+```cpp
+// PIO block 1, three encoders: A pins on GPIO 6, 8 and 10 (B on 7, 9 and 11)
+EncoderPIO knobs(1, 6, 8, 10);
+
+void setup()
+{
+  knobs.initialiseEncoder();
+  knobs.setLimits(0, 0, 255);   // encoder 0
+  knobs.setLimits(1, 0, 255);   // encoder 1
+  knobs.setStep(1, 5);          // encoder 1 changes by 5 per detent
+  knobs.setLimits(2, -50, 50);  // encoder 2
+  knobs.setWrap(2, true);
+}
+
+void loop()
+{
+  int a = knobs.getPosition(0);
+  int b = knobs.getPosition(1);
+  int c = knobs.getPosition(2);
+}
+```
+
+### A compass-style knob
+
+A heading from -180 to +180 degrees in 5 degree steps, where -180 and +180 are the same direction:
+
+```cpp
+EncoderPIO compass(0, 2);
+
+void setup()
+{
+  compass.initialiseEncoder();
+  compass.setLimits(-180, 180);
+  compass.setStep(5);
+  compass.setWrap(true);
+  compass.setWrapEndsDistinct(false);   // -180 and +180 are the same point
+}
+```
+
+Turning down from -178 now gives +177 (see [Step size and wrapping](#step-size-and-wrapping)).
 
 ## API reference
 
@@ -52,7 +133,7 @@ EncoderPIO(uint8_t pioNum, uint8_t enc1PinA, uint8_t enc2PinA, uint8_t enc3PinA)
 EncoderPIO(uint8_t pioNum, uint8_t enc1PinA, uint8_t enc2PinA, uint8_t enc3PinA, uint8_t enc4PinA);
 ```
 
-`pioNum` is 0 or 1 (or 2 on RP2350). The number of pin arguments sets the number of encoders. Objects cannot be copied.
+`pioNum` is 0 or 1 (and 2 on RP2350). The number of pin arguments sets the number of encoders. Objects cannot be copied.
 
 ### Starting and stopping
 
@@ -79,12 +160,35 @@ The `encoder` argument can be left out for encoder 0, so single-encoder code sta
 | Method | Description |
 |--------|-------------|
 | `bool setLimits(uint8_t encoder, int minPos, int maxPos)` | Sets the range (default 0 to 100). Returns `false` if `maxPos <= minPos` or the index is invalid. The current position is clamped into the new range. |
-| `void setWrap(uint8_t encoder, bool wrap)` | `true`: going past a limit wraps to the other end. `false` (default): stops at the limit. |
+| `void setWrap(uint8_t encoder, bool wrap)` | `true`: going past a limit wraps round to the other end. `false` (default): stops at the limit. |
+| `void setWrapEndsDistinct(uint8_t encoder, bool distinct)` | Only matters with wrap on. `true` (default): `minPos` and `maxPos` are separate positions, so one step from a limit goes straight to the other. `false`: they are the same point on a circle, like compass degrees. See [Step size and wrapping](#step-size-and-wrapping). |
 | `void setCountsPerDetent(uint8_t encoder, uint8_t counts)` | Quadrature edges per position step, 1 to 100 (default 1). Use 4 for the common type with one full cycle per detent, 2 for encoders with two edges per detent. |
+| `void setStep(uint8_t encoder, uint16_t step)` | Amount the position changes per detent, 1 to 65535 (default 1). A value of 0 is treated as 1. Can be changed while running. |
 | `void setPullUps(bool enable)` | Internal pull-ups on A and B of every encoder (default `true`). Can be called before or after `initialiseEncoder()`. |
 | `bool setSampleRate(uint32_t hz)` | Pin sampling rate of the PIO program (default 1 MHz). Can be called before or after `initialiseEncoder()`. Returns `false` if `hz` is 0. |
 
-For each per-encoder method, the encoder-less form (for example `setLimits(0, 100)`) applies to encoder 0.
+For each per-encoder method, the encoder-less form (for example `setLimits(0, 100)` or `setStep(5)`) applies to encoder 0.
+
+`setCountsPerDetent()` and `setStep()` work together: counts per detent says how many edges make one detent, and step says how far the position moves for each detent. For example, 4 counts per detent with a step of 5 moves the position by 5 for every full click.
+
+### Step size and wrapping
+
+**Without wrap**, a move that would pass a limit stops on it, so `minPos` and `maxPos` can always be reached. With a step of 10 on a range of 0 to 100, a click up from 95 gives 100.
+
+**With wrap**, the excess carries over past the opposite limit instead of stopping or snapping to it. A step larger than the whole range keeps going round correctly.
+
+`setWrapEndsDistinct()` chooses how the two limits count:
+
+- `true` (default): both limits are separate positions, so the circle has `maxPos - minPos + 1` positions. With a step of 1, one click down from `minPos` gives `maxPos`, and one click up from `maxPos` gives `minPos`.
+- `false`: the limits are the same point, so the circle has `maxPos - minPos` positions.
+
+Example with a range of -180 to +180 and a step of 5:
+
+| Move | Distinct ends (default) | Shared ends |
+|---|---|---|
+| -178 down | +178 | +177 |
+| -180 down by 1 | +180 | +179 |
+| +180 up by 1 | -180 | -179 |
 
 ### Sample rate notes
 
@@ -96,11 +200,13 @@ The PIO program takes 5 or 6 PIO cycles per sample depending on the path, so the
 - The PIO program must load at offset 0 of the PIO instruction memory, so it cannot share a PIO block with another program that already occupies offset 0
 - B must be on GPIO A + 1
 - Position is a signed `int`; sub-detent counting uses an `int8_t`, which is why counts per detent are limited to 100
+- The step size is limited to 65535
+- The limits `INT_MIN` to `INT_MAX` always use shared ends when wrapping, because the distinct-ends lap length would overflow. This does not matter for any practical range.
 - If the RX FIFO fills up (the CPU cannot keep up), further steps are dropped
 
 ## Further reading
 
-See [EXPLANATION.md](EXPLANATION.md) for a detailed description of how the library works.
+See [EXPLANATION.md](EXPLANATION.md) for a detailed description of how the library works. It describes the position-update code, so it needs updating for the step size and wrap changes too.
 
 ## Licence
 

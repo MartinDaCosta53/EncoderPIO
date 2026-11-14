@@ -100,7 +100,9 @@ byte        indexIn(byte i);   // encoder i's number within that object
 5. Configures every encoder:
    - `setLimits(idx, min, max)`: returns `false` if `min >= max`
    - `setPosition(idx, 0)`: initial position
+   - `setStep(idx, steps)`: set size of detent increment and decrement.  Default is 1.
    - `setWrap(idx, wrap)`: wrap or clamp at limits
+   - `setWrapEndsDistinct(idx, ends)`: true (default) keeps `minPos` and `maxPos` as seperate, linear, identities.  False makeds them the same point on a circle.
    - `setCountsPerDetent(idx, edgesPerDetent)`: edges per click
 
 ### 5. `loop()`
@@ -109,14 +111,14 @@ For each encoder, the sketch reads the current position with `getPosition()` and
 
 ## Example configuration
 
-| Encoder | Min | Max | Wrap | Typical use |
-|---------|-----|-----|------|-------------|
-| 0 | -10 | 10 | No | Small bipolar adjustment |
-| 1 | 0 | 100 | Yes | Wrapping percentage |
-| 2 | 0 | 255 | No | 8-bit value (e.g. brightness) |
-| 3 | 0 | 360 | Yes | Angle in degrees |
-| 4 | -180 | 180 | Yes | Signed angle |
-| 5 | 0 | 100 | No | Clamped percentage |
+| Encoder | Min | Max | Steps | Wrap | ends | Typical use |
+|---------|-----|-----|-------|------|------|-------------|
+| 0 | -10 | 10 | 1 | No | Circular | Small bipolar adjustment |
+| 1 | 0 | 100 | 5 | Yes | Linear | Wrapping percentage |
+| 2 | 0 | 255 | 10 | No | Circular | 8-bit value (e.g. brightness) |
+| 3 | 0 | 360 | 6 | Yes | Circular | Angle in degrees |
+| 4 | -180 | 180 | 1 | Yes | Circular | Signed angle |
+| 5 | 0 | 100 | 4 | No | Linear | Clamped percentage |
 
 ## Expected output
 
@@ -146,7 +148,7 @@ Turning an encoder then prints:
 ## Adapting the example
 
 1. Edit `ENCODER_PINS` with the A pin of each encoder (B = A+1).
-2. Resize `minPos`, `maxPos` and `wrap` to match, and set the values you need.
+2. Resize `minPos`, `maxPos`, `step size`, `wrap` and `wrap type` to match, and set the values you need.
 3. Set `edgesPerDetent` to suit your encoders.
 4. Make sure the count does not exceed the capacity of your chip.
 
