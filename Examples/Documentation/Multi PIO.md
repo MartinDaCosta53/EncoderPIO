@@ -68,7 +68,7 @@ Per-encoder settings are held in parallel arrays, indexed by encoder number:
 | `ends` | optional wrap behaviour. `true` = `minPos` & `maxPos` are discrete, linear, positions; `false` = same position on circle.|
 | `oldPos[]` / `newPos[]` | Previous and current position, used to detect change.|
 
-A single `edgesPerDetent` value (set to 2) says how many quadrature edges make up one physical click of the encoder. Set this to match your encoder (commonly 1, 2 or 4).
+A single `edgesPerDetent` value (set to 2) says how many quadrature edges make up one physical click of the encoder. Set this to match your encoders (commonly 1, 2 or 4).
 
 Keep these arrays the same length as `ENCODER_PINS`.
 
