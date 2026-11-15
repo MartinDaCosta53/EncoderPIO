@@ -90,7 +90,9 @@ Because the PIO hardware tracks the encoder independently of the CPU, no rotatio
 
 - **Change pins:** edit `PIN_ENCA`. Remember the B pin must be A + 1.
 - **Change the range:** edit `minPos` and `maxPos`.
+- **Change the step size:** edit `step`. If this function is omitted, then step size will default to 1.
 - **Enable wrap-around:** pass `true` to `setWrap()`, which suits dials such as a heading or a menu that should loop.
+- **Change wrap mode:** If wrap is enabled set to false for circular limits. e.g. to make 180 and -180 interchangeable.
 - **Adjust feel:** change `counts` to match your encoder's detents.
 - **Use the position:** replace the `Serial` print in `loop()` with your own action, such as changing a setting or moving a menu selection.
 
