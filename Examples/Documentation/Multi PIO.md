@@ -74,7 +74,6 @@ Per-encoder settings are held in parallel arrays, indexed by encoder number:
 | `wrap[]` | `true` = wrap around at the limits; `false` = clamp at the limits.|
 | `ends` | optional wrap behaviour. `true` = `minPos` & `maxPos` are discrete, linear, positions; `false` = same position on circle.|
 | `oldPos[]` / `newPos[]` | Previous and current position, used to detect change.|
->>>>>>> a30b86b5859ea465376ca4d508d3b629ca09f9d2
 
 A single `edgesPerDetent` value (set to 2) says how many quadrature edges make up one physical click of the encoder. Set this to match your encoders (commonly 1, 2 or 4).
 
