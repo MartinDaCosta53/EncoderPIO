@@ -142,8 +142,8 @@ Open the Serial Monitor at **115200 baud**. On start-up you should see something
 Turning an encoder then prints:
 
 ```
-> Encoder 2 position = 1
-> Encoder 2 position = 2
+> Encoder 2 position = 10
+> Encoder 2 position = 20
 > Encoder 0 position = -1
 ```
 
