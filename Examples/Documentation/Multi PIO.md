@@ -62,9 +62,11 @@ Per-encoder settings are held in parallel arrays, indexed by encoder number:
 
 | Array | Purpose |
 |-------|---------|
-| `minPos[]` / `maxPos[]` | Lower and upper position limits |
-| `wrap[]` | `true` = wrap around at the limits; `false` = clamp at the limits |
-| `oldPos[]` / `newPos[]` | Previous and current position, used to detect change |
+| `minPos[]` / `maxPos[]` | Lower and upper position limits.|
+| `steps[]` | increment and decrement size per detent.  Optional with a default of 1.|
+| `wrap[]` | `true` = wrap around at the limits; `false` = clamp at the limits.|
+| `ends` | optional wrap behaviour. `true` = `minPos` & `maxPos` are discrete, linear, positions; `false` = same position on circle.|
+| `oldPos[]` / `newPos[]` | Previous and current position, used to detect change.|
 
 A single `edgesPerDetent` value (set to 2) says how many quadrature edges make up one physical click of the encoder. Set this to match your encoder (commonly 1, 2 or 4).
 
