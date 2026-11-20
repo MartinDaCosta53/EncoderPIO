@@ -206,7 +206,7 @@ The PIO program takes 5 or 6 PIO cycles per sample depending on the path, so the
 
 ## Further reading
 
-See [Documentation/EXPLANATION.md](EXPLANATION.md) for a detailed description of how the library works. It describes the position-update code, so it needs updating for the step size and wrap changes too.
+See [EXPLANATION.md](Documentation/EXPLANATION.md) for a detailed description of how the library works. It describes the position-update code, so it needs updating for the step size and wrap changes too.
 
 ## Licence
 
