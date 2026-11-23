@@ -359,23 +359,27 @@ __not_in_flash("EncoderPIO") void EncoderPIO::pio2_irq_handler()
 
 // Empties the RX FIFO of every encoder's state machine. Each word is the
 // B'A'BA value of one step; the interrupt stays asserted until the FIFO is empty.
+__not_in_flash("EncoderPIO") void EncoderPIO::Channel::update()
+{
+  while (!pio_sm_is_rx_fifo_empty(_pio, sm))
+  {
+    uint32_t v = pio_sm_get(_pio, sm) & 0xF;
+    if ((DEC_MASK >> v) & 1u)
+    {
+      decPos();
+    }
+    else if ((INC_MASK >> v) & 1u)
+    {
+      incPos();
+    }
+  }
+}
+
 __not_in_flash("EncoderPIO") void EncoderPIO::serviceFifos()
 {
   for (uint8_t i = 0; i < _numEncoders; i++)
   {
-    Channel& ch = _ch[i];
-    while (!pio_sm_is_rx_fifo_empty(_pio, ch.sm))
-    {
-      uint32_t v = pio_sm_get(_pio, ch.sm) & 0xF;
-      if ((DEC_MASK >> v) & 1u)
-      {
-        ch.decPos();
-      }
-      else if ((INC_MASK >> v) & 1u)
-      {
-        ch.incPos();
-      }
-    }
+    _ch[i].update();
   }
 }
 
@@ -497,6 +501,17 @@ void EncoderPIO::setPosition(uint8_t encoder, int newPosition)
   restore_interrupts(irqState);
 }
 
+void EncoderPIO::Channel::setLimits(int newMinPos, int newMaxPos)
+{
+  minPos = newMinPos;
+  maxPos = newMaxPos;
+  int pos = position;
+  if (pos < newMinPos) pos = newMinPos;
+  if (pos > newMaxPos) pos = newMaxPos;
+  position = pos;
+  subCount = 0;
+}
+
 // Returns false (and changes nothing) if maxPos <= minPos or the index is invalid.
 // The current position is clamped into the new range.
 bool EncoderPIO::setLimits(uint8_t encoder, int minPos, int maxPos)
@@ -505,16 +520,9 @@ bool EncoderPIO::setLimits(uint8_t encoder, int minPos, int maxPos)
   {
     return false;
   }
-  Channel& ch = _ch[encoder];
 
   uint32_t irqState = save_and_disable_interrupts();
-  ch.minPos = minPos;
-  ch.maxPos = maxPos;
-  int pos = ch.position;
-  if (pos < ch.minPos) pos = ch.minPos;
-  if (pos > ch.maxPos) pos = ch.maxPos;
-  ch.position = pos;
-  ch.subCount = 0;
+  _ch[encoder].setLimits(minPos, maxPos);
   restore_interrupts(irqState);
   return true;
 }

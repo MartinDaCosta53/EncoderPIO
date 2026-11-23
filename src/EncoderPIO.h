@@ -73,7 +73,9 @@ private:
   {
     void decPos();
     void incPos();
+    void update();
     int movePosition(int pos, bool forward);
+    void setLimits(int newMinPos, int newMaxPos);
 
     uint8_t pinA = 0;
     uint8_t sm = 0;
