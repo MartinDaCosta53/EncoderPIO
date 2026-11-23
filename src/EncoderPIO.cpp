@@ -359,23 +359,27 @@ __not_in_flash("EncoderPIO") void EncoderPIO::pio2_irq_handler()
 
 // Empties the RX FIFO of every encoder's state machine. Each word is the
 // B'A'BA value of one step; the interrupt stays asserted until the FIFO is empty.
+__not_in_flash("EncoderPIO") void EncoderPIO::Channel::update()
+{
+  while (!pio_sm_is_rx_fifo_empty(_pio, sm))
+  {
+    uint32_t v = pio_sm_get(_pio, sm) & 0xF;
+    if ((DEC_MASK >> v) & 1u)
+    {
+      decPos();
+    }
+    else if ((INC_MASK >> v) & 1u)
+    {
+      incPos();
+    }
+  }
+}
+
 __not_in_flash("EncoderPIO") void EncoderPIO::serviceFifos()
 {
   for (uint8_t i = 0; i < _numEncoders; i++)
   {
-    Channel& ch = _ch[i];
-    while (!pio_sm_is_rx_fifo_empty(_pio, ch.sm))
-    {
-      uint32_t v = pio_sm_get(_pio, ch.sm) & 0xF;
-      if ((DEC_MASK >> v) & 1u)
-      {
-        decPos(ch);
-      }
-      else if ((INC_MASK >> v) & 1u)
-      {
-        incPos(ch);
-      }
-    }
+    _ch[i].update();
   }
 }
 
@@ -399,7 +403,7 @@ __not_in_flash("EncoderPIO") void EncoderPIO::serviceFifos()
 // The distances are computed as unsigned values, which are exact even when
 // the range is wider than INT_MAX. A division is only needed in the rare case
 // that the step is at least a whole range, so the usual path has none.
-__not_in_flash("EncoderPIO") static int movePosition(int pos, uint16_t step, bool forward, int minPos, int maxPos, bool wrap, bool distinct)
+__not_in_flash("EncoderPIO") int EncoderPIO::Channel::movePosition(int pos, bool forward)
 {
   uint32_t room = forward ? ((uint32_t)maxPos - (uint32_t)pos)
                           : ((uint32_t)pos - (uint32_t)minPos);
@@ -420,7 +424,7 @@ __not_in_flash("EncoderPIO") static int movePosition(int pos, uint16_t step, boo
   // (INT_MIN to INT_MAX would make range + 1 overflow to 0, so that one range
   // always uses shared ends.)
   uint32_t range  = (uint32_t)maxPos - (uint32_t)minPos;
-  uint32_t skip   = (distinct && range != 0xFFFFFFFFu) ? 1 : 0;
+  uint32_t skip   = (wrapEndsDistinct && range != 0xFFFFFFFFu) ? 1 : 0;
   uint32_t period = range + skip;
   uint32_t e      = (step - room) - skip;   // 0 or more
 
@@ -436,35 +440,35 @@ __not_in_flash("EncoderPIO") static int movePosition(int pos, uint16_t step, boo
                  : (int)((uint32_t)maxPos - e);
 }
 
-__not_in_flash("EncoderPIO") void EncoderPIO::decPos(Channel& ch)
+__not_in_flash("EncoderPIO") void EncoderPIO::Channel::decPos()
 {
-  ch.subCount = ch.subCount - 1;
-  if (ch.subCount > -(int8_t)ch.countsPerDetent)
+  subCount = subCount - 1;
+  if (subCount > -(int8_t)countsPerDetent)
   {
     return;  // detent not complete yet
   }
-  ch.subCount = 0;
+  subCount = 0;
 
-  int pos = ch.position;
-  if (pos > ch.minPos || ch.wrap)
+  int pos = position;
+  if (pos > minPos || wrap)
   {
-    ch.position = movePosition(pos, ch.step, false, ch.minPos, ch.maxPos, ch.wrap, ch.wrapEndsDistinct);
+    position = movePosition(pos, false);
   }
 }
 
-__not_in_flash("EncoderPIO") void EncoderPIO::incPos(Channel& ch)
+__not_in_flash("EncoderPIO") void EncoderPIO::Channel::incPos()
 {
-  ch.subCount = ch.subCount + 1;
-  if (ch.subCount < (int8_t)ch.countsPerDetent)
+  subCount = subCount + 1;
+  if (subCount < (int8_t)countsPerDetent)
   {
     return;  // detent not complete yet
   }
-  ch.subCount = 0;
+  subCount = 0;
 
-  int pos = ch.position;
-  if (pos < ch.maxPos || ch.wrap)
+  int pos = position;
+  if (pos < maxPos || wrap)
   {
-    ch.position = movePosition(pos, ch.step, true, ch.minPos, ch.maxPos, ch.wrap, ch.wrapEndsDistinct);
+    position = movePosition(pos, true);
   }
 }
 
@@ -497,6 +501,17 @@ void EncoderPIO::setPosition(uint8_t encoder, int newPosition)
   restore_interrupts(irqState);
 }
 
+void EncoderPIO::Channel::setLimits(int newMinPos, int newMaxPos)
+{
+  minPos = newMinPos;
+  maxPos = newMaxPos;
+  int pos = position;
+  if (pos < newMinPos) pos = newMinPos;
+  if (pos > newMaxPos) pos = newMaxPos;
+  position = pos;
+  subCount = 0;
+}
+
 // Returns false (and changes nothing) if maxPos <= minPos or the index is invalid.
 // The current position is clamped into the new range.
 bool EncoderPIO::setLimits(uint8_t encoder, int minPos, int maxPos)
@@ -505,16 +520,9 @@ bool EncoderPIO::setLimits(uint8_t encoder, int minPos, int maxPos)
   {
     return false;
   }
-  Channel& ch = _ch[encoder];
 
   uint32_t irqState = save_and_disable_interrupts();
-  ch.minPos = minPos;
-  ch.maxPos = maxPos;
-  int pos = ch.position;
-  if (pos < ch.minPos) pos = ch.minPos;
-  if (pos > ch.maxPos) pos = ch.maxPos;
-  ch.position = pos;
-  ch.subCount = 0;
+  _ch[encoder].setLimits(minPos, maxPos);
   restore_interrupts(irqState);
   return true;
 }

@@ -71,6 +71,12 @@ private:
   // State for one encoder
   struct Channel
   {
+    void decPos();
+    void incPos();
+    void update();
+    int movePosition(int pos, bool forward);
+    void setLimits(int newMinPos, int newMaxPos);
+
     uint8_t pinA = 0;
     uint8_t sm = 0;
 
@@ -104,8 +110,6 @@ private:
   void configure(uint8_t pioNum, uint8_t count);
   void serviceFifos();
   void applyPulls();
-  static void decPos(Channel& ch);
-  static void incPos(Channel& ch);
 
   PIO     _pio = nullptr;     // must NOT be static
   uint8_t _pioNum = 0;
