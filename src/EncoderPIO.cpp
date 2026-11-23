@@ -369,11 +369,11 @@ __not_in_flash("EncoderPIO") void EncoderPIO::serviceFifos()
       uint32_t v = pio_sm_get(_pio, ch.sm) & 0xF;
       if ((DEC_MASK >> v) & 1u)
       {
-        decPos(ch);
+        ch.decPos();
       }
       else if ((INC_MASK >> v) & 1u)
       {
-        incPos(ch);
+        ch.incPos();
       }
     }
   }
@@ -399,7 +399,7 @@ __not_in_flash("EncoderPIO") void EncoderPIO::serviceFifos()
 // The distances are computed as unsigned values, which are exact even when
 // the range is wider than INT_MAX. A division is only needed in the rare case
 // that the step is at least a whole range, so the usual path has none.
-__not_in_flash("EncoderPIO") static int movePosition(int pos, uint16_t step, bool forward, int minPos, int maxPos, bool wrap, bool distinct)
+__not_in_flash("EncoderPIO") int EncoderPIO::Channel::movePosition(int pos, bool forward)
 {
   uint32_t room = forward ? ((uint32_t)maxPos - (uint32_t)pos)
                           : ((uint32_t)pos - (uint32_t)minPos);
@@ -420,7 +420,7 @@ __not_in_flash("EncoderPIO") static int movePosition(int pos, uint16_t step, boo
   // (INT_MIN to INT_MAX would make range + 1 overflow to 0, so that one range
   // always uses shared ends.)
   uint32_t range  = (uint32_t)maxPos - (uint32_t)minPos;
-  uint32_t skip   = (distinct && range != 0xFFFFFFFFu) ? 1 : 0;
+  uint32_t skip   = (wrapEndsDistinct && range != 0xFFFFFFFFu) ? 1 : 0;
   uint32_t period = range + skip;
   uint32_t e      = (step - room) - skip;   // 0 or more
 
@@ -436,35 +436,35 @@ __not_in_flash("EncoderPIO") static int movePosition(int pos, uint16_t step, boo
                  : (int)((uint32_t)maxPos - e);
 }
 
-__not_in_flash("EncoderPIO") void EncoderPIO::decPos(Channel& ch)
+__not_in_flash("EncoderPIO") void EncoderPIO::Channel::decPos()
 {
-  ch.subCount = ch.subCount - 1;
-  if (ch.subCount > -(int8_t)ch.countsPerDetent)
+  subCount = subCount - 1;
+  if (subCount > -(int8_t)countsPerDetent)
   {
     return;  // detent not complete yet
   }
-  ch.subCount = 0;
+  subCount = 0;
 
-  int pos = ch.position;
-  if (pos > ch.minPos || ch.wrap)
+  int pos = position;
+  if (pos > minPos || wrap)
   {
-    ch.position = movePosition(pos, ch.step, false, ch.minPos, ch.maxPos, ch.wrap, ch.wrapEndsDistinct);
+    position = movePosition(pos, false);
   }
 }
 
-__not_in_flash("EncoderPIO") void EncoderPIO::incPos(Channel& ch)
+__not_in_flash("EncoderPIO") void EncoderPIO::Channel::incPos()
 {
-  ch.subCount = ch.subCount + 1;
-  if (ch.subCount < (int8_t)ch.countsPerDetent)
+  subCount = subCount + 1;
+  if (subCount < (int8_t)countsPerDetent)
   {
     return;  // detent not complete yet
   }
-  ch.subCount = 0;
+  subCount = 0;
 
-  int pos = ch.position;
-  if (pos < ch.maxPos || ch.wrap)
+  int pos = position;
+  if (pos < maxPos || wrap)
   {
-    ch.position = movePosition(pos, ch.step, true, ch.minPos, ch.maxPos, ch.wrap, ch.wrapEndsDistinct);
+    position = movePosition(pos, true);
   }
 }
 
